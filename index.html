@@ -247,13 +247,35 @@ async function cloudDeleteProviderConnection(provider){try{await cloudProviderRe
 async function cloudLoadProviderConnections(){if(!state.cloud.user||!state.cloud.client)return;try{const data=await cloudProviderRequest('GET');for(const c of (data?.connections||[])){if(c.provider==='todomate'&&c.access_token){state.todomate.token=c.access_token;localStorage.setItem(STORAGE.tmToken,c.access_token);localStorage.setItem(STORAGE.tmKeepConnected,'1')}if(c.provider==='google'&&c.access_token){const exp=c.expires_at?new Date(c.expires_at).getTime():0;localStorage.setItem(STORAGE.googleKeepConnected,'1');if(c.metadata?.clientId&&!state.google.clientId){state.google.clientId=String(c.metadata.clientId);localStorage.setItem(STORAGE.googleClientId,state.google.clientId)}if(exp>Date.now()+30000){state.google.token=c.access_token;localStorage.setItem(STORAGE.googleToken,c.access_token);localStorage.setItem(STORAGE.googleTokenExpiresAt,String(exp))}}}}catch(e){console.warn('provider connections load failed',e)}}
 function externalLinkKey(provider,externalId){return `${provider}:${String(externalId||'')}`}
 function tombstoneKey(provider,externalId){return `${provider}:${String(externalId||'')}`}
-async function cloudLoadTombstones(){if(!state.cloud.user||!state.cloud.client)return;const {data,error}=await state.cloud.client.from('my_week_delete_tombstones').select('provider,external_id').eq('user_id',state.cloud.user.id);if(error){console.warn('tombstones load failed',error);return}state.cloud.tombstones=new Set((data||[]).map(r=>tombstoneKey(r.provider,r.external_id)))}
+async function cloudLoadTombstones(){
+  if(!state.cloud.user||!state.cloud.client)return;
+  const pageSize=1000,rows=[];let from=0;
+  while(true){
+    const {data,error}=await state.cloud.client.from('my_week_delete_tombstones').select('provider,external_id').eq('user_id',state.cloud.user.id).order('provider',{ascending:true}).order('external_id',{ascending:true}).range(from,from+pageSize-1);
+    if(error){console.warn('tombstones load failed',error);return}
+    rows.push(...(data||[]));
+    if(!data||data.length<pageSize)break;
+    from+=pageSize;
+  }
+  state.cloud.tombstones=new Set(rows.map(r=>tombstoneKey(r.provider,r.external_id)))
+}
 function isTombstoned(provider,externalId){return state.cloud.tombstones?.has(tombstoneKey(provider,externalId))||false}
 async function addTombstone(provider,externalId){if(!externalId)return;const key=tombstoneKey(provider,externalId);state.cloud.tombstones.add(key);if(state.cloud.user&&state.cloud.client){await state.cloud.client.from('my_week_delete_tombstones').upsert({user_id:state.cloud.user.id,provider,external_id:String(externalId)},{onConflict:'user_id,provider,external_id'})}}
 async function removeTombstone(provider,externalId){if(!externalId)return;state.cloud.tombstones.delete(tombstoneKey(provider,externalId));if(state.cloud.user&&state.cloud.client){await state.cloud.client.from('my_week_delete_tombstones').delete().eq('user_id',state.cloud.user.id).eq('provider',provider).eq('external_id',String(externalId))}}
 async function cloudDeleteExternalLink(provider,externalId){if(!externalId)return;state.cloud.externalLinks.delete(externalLinkKey(provider,externalId));if(state.cloud.user&&state.cloud.client){await state.cloud.client.from('my_week_external_links').delete().eq('user_id',state.cloud.user.id).eq('provider',provider).eq('external_id',String(externalId))}}
 async function cloudDeleteExternalLinksForEvent(eventObj){if(!state.cloud.user||!state.cloud.client)return;const rows=[...state.cloud.externalLinks.values()].filter(r=>String(r.client_id)===String(eventObj.id));for(const r of rows)state.cloud.externalLinks.delete(externalLinkKey(r.provider,r.external_id));await state.cloud.client.from('my_week_external_links').delete().eq('user_id',state.cloud.user.id).eq('client_id',String(eventObj.id))}
-async function cloudLoadExternalLinks(){if(!state.cloud.user||!state.cloud.client)return;const {data,error}=await state.cloud.client.from('my_week_external_links').select('*').eq('user_id',state.cloud.user.id);if(error){console.warn('external links load failed',error);return}state.cloud.externalLinks=new Map((data||[]).map(row=>[externalLinkKey(row.provider,row.external_id),row]))}
+async function cloudLoadExternalLinks(){
+  if(!state.cloud.user||!state.cloud.client)return;
+  const pageSize=1000,rows=[];let from=0;
+  while(true){
+    const {data,error}=await state.cloud.client.from('my_week_external_links').select('*').eq('user_id',state.cloud.user.id).order('id',{ascending:true}).range(from,from+pageSize-1);
+    if(error){console.warn('external links load failed',error);return}
+    rows.push(...(data||[]));
+    if(!data||data.length<pageSize)break;
+    from+=pageSize;
+  }
+  state.cloud.externalLinks=new Map(rows.map(row=>[externalLinkKey(row.provider,row.external_id),row]))
+}
 async function cloudGetExternalLink(provider,externalId){if(!externalId||!state.cloud.user||!state.cloud.client)return null;const key=externalLinkKey(provider,externalId);if(state.cloud.externalLinks.has(key))return state.cloud.externalLinks.get(key);const {data,error}=await state.cloud.client.from('my_week_external_links').select('*').eq('user_id',state.cloud.user.id).eq('provider',provider).eq('external_id',String(externalId)).maybeSingle();if(error)return null;if(data)state.cloud.externalLinks.set(key,data);return data||null}
 async function cloudGetEventByClientId(clientId){let e=state.events.find(x=>String(x.id)===String(clientId));if(e||!state.cloud.user||!state.cloud.client)return e||null;const {data,error}=await state.cloud.client.from('my_week_events').select('*').eq('user_id',state.cloud.user.id).eq('client_id',String(clientId)).maybeSingle();if(error||!data)return null;e=cloudRowEvent(data);state.events.push(e);return e}
 async function cloudRegisterExternalLink(eventObj,provider,externalId,{preferPrimary=true}={}){if(!eventObj||!externalId)return null;externalId=String(externalId);if(!state.cloud.user||!state.cloud.client){if(provider==='todomate'&&!eventObj.todomateTodoId)eventObj.todomateTodoId=externalId;if(provider==='google'&&!eventObj.googleEventId)eventObj.googleEventId=externalId;return {client_id:String(eventObj.id),provider,external_id:externalId,is_primary:true}}const existing=await cloudGetExternalLink(provider,externalId);if(existing)return existing;const primaries=[...state.cloud.externalLinks.values()].filter(r=>r.provider===provider&&String(r.client_id)===String(eventObj.id)&&r.is_primary);let isPrimary=Boolean(preferPrimary&&!primaries.length);const row={user_id:state.cloud.user.id,client_id:String(eventObj.id),provider,external_id:externalId,is_primary:isPrimary};let {data,error}=await state.cloud.client.from('my_week_external_links').insert(row).select('*').single();if(error){const fallback=await cloudGetExternalLink(provider,externalId);if(fallback)return fallback;console.warn('external link insert failed',error);return null}state.cloud.externalLinks.set(externalLinkKey(provider,externalId),data);if(data.is_primary){if(provider==='todomate')eventObj.todomateTodoId=externalId;if(provider==='google')eventObj.googleEventId=externalId;await cloudUpsertEvent(eventObj)}return data}
@@ -264,7 +286,27 @@ let cloudSettingsTimer=null;
 function scheduleCloudSettingsSave(){if(!state.cloud.user||!state.cloud.client)return;clearTimeout(cloudSettingsTimer);cloudSettingsTimer=setTimeout(cloudSaveSettings,450)}
 async function cloudSaveSettings(){if(!state.cloud.user||!state.cloud.client||state.cloud.savingSettings)return;state.cloud.savingSettings=true;try{const settings={categoryColors:state.categoryColors,todomateCategoryMap:state.todomate.categoryMap,view:state.view,collapsedFolders:state.collapsedFolders};await state.cloud.client.from('my_week_settings').upsert({user_id:state.cloud.user.id,settings},{onConflict:'user_id'})}finally{state.cloud.savingSettings=false}}
 async function cloudLoadSettings(){if(!state.cloud.user||!state.cloud.client)return;const {data}=await state.cloud.client.from('my_week_settings').select('settings').eq('user_id',state.cloud.user.id).maybeSingle();const st=data?.settings;if(!st)return;if(st.categoryColors)state.categoryColors={...CATEGORY_DEFAULTS,...st.categoryColors};if(st.todomateCategoryMap)state.todomate.categoryMap=st.todomateCategoryMap;if(st.view&&['day','week','month'].includes(st.view))state.view=st.view;if(st.collapsedFolders)state.collapsedFolders=st.collapsedFolders;persist()}
-async function cloudLoadEvents(){if(!state.cloud.user||!state.cloud.client)return;renderCloudStatus('Cloud 일정 불러오는 중…');const {data,error}=await state.cloud.client.from('my_week_events').select('*').eq('user_id',state.cloud.user.id).order('event_date');if(error){renderCloudStatus('Cloud 불러오기 실패');console.error(error);return}const remote=(data||[]).map(cloudRowEvent);if(remote.length){state.events=remote}else if(state.events.length){await cloudUpsertEvents(state.events)}persist();renderAll();renderCloudStatus(`Cloud 연결됨 · 일정 ${state.events.length}개`)}
+async function cloudLoadEvents(){
+  if(!state.cloud.user||!state.cloud.client)return;
+  renderCloudStatus('Cloud 일정 불러오는 중…');
+  const pageSize=1000,rows=[];let from=0;
+  while(true){
+    const {data,error}=await state.cloud.client.from('my_week_events').select('*').eq('user_id',state.cloud.user.id).order('event_date',{ascending:true}).order('client_id',{ascending:true}).range(from,from+pageSize-1);
+    if(error){renderCloudStatus('Cloud 불러오기 실패');console.error(error);return}
+    rows.push(...(data||[]));
+    renderCloudStatus(`Cloud 일정 불러오는 중… ${rows.length}개`);
+    if(!data||data.length<pageSize)break;
+    from+=pageSize;
+  }
+  const remote=rows.map(cloudRowEvent);
+  if(remote.length){
+    state.events=remote;
+  }else if(state.events.length){
+    await cloudUpsertEvents(state.events)
+  }
+  persist();renderAll();
+  renderCloudStatus(`Cloud 연결됨 · 일정 ${state.events.length}개`)
+}
 function cloudApplyRealtime(payload){const row=payload.new||payload.old;if(!row||row.user_id!==state.cloud.user?.id)return;const cid=String(row.client_id||'');if(payload.eventType==='DELETE'){state.events=state.events.filter(e=>String(e.id)!==cid)}else{const e=cloudRowEvent(payload.new),idx=state.events.findIndex(x=>String(x.id)===cid);if(idx>=0)state.events[idx]=e;else state.events.push(e)}localStorage.setItem(STORAGE.events,JSON.stringify(state.events));renderAll()}
 function cloudSubscribe(){if(!state.cloud.user||!state.cloud.client)return;if(state.cloud.channel)state.cloud.client.removeChannel(state.cloud.channel);state.cloud.channel=state.cloud.client.channel(`my-week-${state.cloud.user.id}`).on('postgres_changes',{event:'*',schema:'public',table:'my_week_events',filter:`user_id=eq.${state.cloud.user.id}`},cloudApplyRealtime).subscribe()}
 async function cloudAfterLogin(user){state.cloud.user=user;await cloudLoadSettings();await cloudLoadEvents();await cloudLoadExternalLinks();await cloudLoadTombstones();await seedExternalLinksFromEvents();await cloudLoadProviderConnections();cloudSubscribe();renderCloudStatus();showToast('My Week Cloud에 연결했습니다. 저장된 외부 연결도 복원합니다.')}
