@@ -81,15 +81,25 @@
 
     <div class="sync-card">
       <div class="sync-title"><span>My Week Cloud</span><span>●</span></div>
+      <div class="sync-row" id="cloudProjectFields">
+        <input class="sync-input" id="cloudProjectUrl" type="url" placeholder="Supabase Project URL" autocomplete="off" />
+        <input class="sync-input" id="cloudProjectKey" type="text" placeholder="Supabase Publishable Key" autocomplete="off" />
+      </div>
+      <div class="sync-actions" id="cloudProjectActions">
+        <button id="cloudProjectSaveBtn">프로젝트 적용</button>
+      </div>
       <div class="sync-row" id="cloudLoginFields">
-        <input class="sync-input" id="cloudEmail" type="email" placeholder="이메일" autocomplete="email" />
+        <input class="sync-input" id="cloudEmail" type="email" placeholder="이메일" autocomplete="username" />
+        <input class="sync-input" id="cloudPassword" type="password" placeholder="비밀번호" autocomplete="current-password" />
       </div>
       <div class="sync-actions">
-        <button class="connect" id="cloudMagicBtn">로그인 링크 보내기</button>
+        <button class="connect" id="cloudLoginBtn">로그인</button>
+        <button id="cloudSignupBtn">가입</button>
+        <button id="cloudGoogleBtn">Google 로그인</button>
         <button id="cloudLogoutBtn" hidden>로그아웃</button>
       </div>
       <div class="sync-status" id="cloudStatus">연결되지 않음</div>
-      <div class="sync-note">My Week 일정 동기화를 위한 계정입니다. Supabase 관리자 계정과는 별개이며, 비밀번호 없이 이메일로 받은 링크로 로그인합니다.</div>
+      <div class="sync-note">Supabase 관리자 대시보드 계정과 My Week 사용자 로그인은 별개입니다. 프로젝트를 다른 Supabase 계정/조직으로 옮긴 뒤에도 같은 프로젝트면 그대로 사용할 수 있고, 새 프로젝트로 바꾼 경우 Project URL과 Publishable Key만 입력하면 됩니다. 인증 메일을 쓰지 않으려면 이메일 확인을 끄거나 Google 로그인을 사용하세요.</div>
     </div>
 
     <div class="sync-card">
@@ -167,11 +177,13 @@ const CATEGORY_DEFAULTS={
 };
 const categories=Object.keys(CATEGORY_DEFAULTS);
 const startHour=6,endHour=24,dayNames=['월','화','수','목','금','토','일'];
-const SUPABASE_URL='https://aqjlysanizmvhdekwmxw.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_AlJDadpPdLmmdmliIu0H_Q_msBuV7Of';
+const DEFAULT_SUPABASE_URL='https://aqjlysanizmvhdekwmxw.supabase.co';
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY='sb_publishable_AlJDadpPdLmmdmliIu0H_Q_msBuV7Of';
 const AUTO_SYNC_INTERVAL_MS=10000;
 function hourPx(){return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hour-height'))||64}
-const STORAGE={events:'myWeekEventsV2',colors:'myWeekColorsV2',theme:'myWeekThemeV2',view:'myWeekViewV2',googleClientId:'myWeekGoogleClientIdV2',folders:'myWeekFoldersV2',tmCategoryMap:'myWeekTodomateCategoryMapV4'};
+const STORAGE={events:'myWeekEventsV2',colors:'myWeekColorsV2',theme:'myWeekThemeV2',view:'myWeekViewV2',googleClientId:'myWeekGoogleClientIdV2',folders:'myWeekFoldersV2',tmCategoryMap:'myWeekTodomateCategoryMapV4',cloudUrl:'myWeekSupabaseUrlV1',cloudKey:'myWeekSupabasePublishableKeyV1'};
+let SUPABASE_URL=localStorage.getItem(STORAGE.cloudUrl)||DEFAULT_SUPABASE_URL;
+let SUPABASE_PUBLISHABLE_KEY=localStorage.getItem(STORAGE.cloudKey)||DEFAULT_SUPABASE_PUBLISHABLE_KEY;
 const oldEvents=JSON.parse(localStorage.getItem('weeklySchedulerEvents')||'[]');
 const state={
   cursorDate:new Date(),
@@ -206,7 +218,20 @@ function isMobile(){return matchMedia('(max-width:760px)').matches}
 function cloudConfigured(){return Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY&&!SUPABASE_PUBLISHABLE_KEY.startsWith('__'))}
 function cloudEventRow(e){if(!state.cloud.user)return null;return {user_id:state.cloud.user.id,client_id:String(e.id),event_date:e.date,start_time:e.hasTime&&e.start?e.start:null,end_time:e.hasTime&&e.end?e.end:null,has_time:Boolean(e.hasTime),title:e.title||'',category:categories.includes(e.category)?e.category:'Personal',completed:Boolean(e.completed),source:e.source||'local',todomate_todo_id:e.todomateTodoId||null,todomate_goal_id:e.todomateGoalId||null,todomate_goal_name:e.todomateGoalName||null,google_event_id:e.googleEventId||null,google_calendar_id:'primary',routine_id:e.routineId||null,repeat_type:e.repeatType||'none',last_synced_from:e.lastSyncedFrom||null,external_updated_at:e.externalUpdatedAt||null}}
 function cloudRowEvent(r){return {id:String(r.client_id),date:String(r.event_date),start:r.has_time&&r.start_time?String(r.start_time).slice(0,5):'',end:r.has_time&&r.end_time?String(r.end_time).slice(0,5):'',hasTime:Boolean(r.has_time),completed:Boolean(r.completed),title:r.title||'',category:categories.includes(r.category)?r.category:'Personal',source:r.source||'local',todomateTodoId:r.todomate_todo_id||null,todomateGoalId:r.todomate_goal_id||null,todomateGoalName:r.todomate_goal_name||'',googleEventId:r.google_event_id||null,routineId:r.routine_id||null,repeatType:r.repeat_type||'none',lastSyncedFrom:r.last_synced_from||null,externalUpdatedAt:r.external_updated_at||null}}
-function renderCloudStatus(message){const el=document.getElementById('cloudStatus');const fields=document.getElementById('cloudLoginFields'),logout=document.getElementById('cloudLogoutBtn'),magic=document.getElementById('cloudMagicBtn');if(!cloudConfigured()){el.className='sync-status';el.textContent='Supabase 키 설정 대기';return}if(state.cloud.user){el.className='sync-status ok';el.textContent=message||`Cloud 연결됨 · ${state.cloud.user.email||'로그인 사용자'}`;fields.hidden=true;logout.hidden=false;magic.hidden=true}else{el.className='sync-status';el.textContent=message||'연결되지 않음';fields.hidden=false;logout.hidden=true;magic.hidden=false}}
+function renderCloudStatus(message){
+  const el=document.getElementById('cloudStatus');
+  const fields=document.getElementById('cloudLoginFields'),logout=document.getElementById('cloudLogoutBtn');
+  const login=document.getElementById('cloudLoginBtn'),signup=document.getElementById('cloudSignupBtn'),google=document.getElementById('cloudGoogleBtn');
+  const projectFields=document.getElementById('cloudProjectFields'),projectActions=document.getElementById('cloudProjectActions');
+  if(!cloudConfigured()){el.className='sync-status';el.textContent='Supabase 프로젝트 정보를 입력해주세요.';return}
+  if(state.cloud.user){
+    el.className='sync-status ok';el.textContent=message||`Cloud 연결됨 · ${state.cloud.user.email||'로그인 사용자'}`;
+    fields.hidden=true;logout.hidden=false;login.hidden=true;signup.hidden=true;google.hidden=true;projectFields.hidden=true;projectActions.hidden=true;
+  }else{
+    el.className='sync-status';el.textContent=message||'연결되지 않음';
+    fields.hidden=false;logout.hidden=true;login.hidden=false;signup.hidden=false;google.hidden=false;projectFields.hidden=false;projectActions.hidden=false;
+  }
+}
 async function cloudUpsertEvent(e){if(!state.cloud.user||!state.cloud.client)return false;const row=cloudEventRow(e);const {error}=await state.cloud.client.from('my_week_events').upsert(row,{onConflict:'user_id,client_id'});if(error){console.error('cloud upsert',error);return false}return true}
 async function cloudUpsertEvents(events){if(!state.cloud.user||!state.cloud.client||!events.length)return false;const rows=events.map(cloudEventRow).filter(Boolean);const {error}=await state.cloud.client.from('my_week_events').upsert(rows,{onConflict:'user_id,client_id'});if(error){console.error('cloud batch upsert',error);return false}return true}
 async function cloudDeleteEvent(e){if(!state.cloud.user||!state.cloud.client)return;await state.cloud.client.from('my_week_events').delete().eq('user_id',state.cloud.user.id).eq('client_id',String(e.id))}
@@ -218,9 +243,52 @@ async function cloudLoadEvents(){if(!state.cloud.user||!state.cloud.client)retur
 function cloudApplyRealtime(payload){const row=payload.new||payload.old;if(!row||row.user_id!==state.cloud.user?.id)return;const cid=String(row.client_id||'');if(payload.eventType==='DELETE'){state.events=state.events.filter(e=>String(e.id)!==cid)}else{const e=cloudRowEvent(payload.new),idx=state.events.findIndex(x=>String(x.id)===cid);if(idx>=0)state.events[idx]=e;else state.events.push(e)}localStorage.setItem(STORAGE.events,JSON.stringify(state.events));renderAll()}
 function cloudSubscribe(){if(!state.cloud.user||!state.cloud.client)return;if(state.cloud.channel)state.cloud.client.removeChannel(state.cloud.channel);state.cloud.channel=state.cloud.client.channel(`my-week-${state.cloud.user.id}`).on('postgres_changes',{event:'*',schema:'public',table:'my_week_events',filter:`user_id=eq.${state.cloud.user.id}`},cloudApplyRealtime).subscribe()}
 async function cloudAfterLogin(user){state.cloud.user=user;await cloudLoadSettings();await cloudLoadEvents();cloudSubscribe();renderCloudStatus();showToast('My Week Cloud에 연결했습니다.')}
-async function cloudSendMagicLink(){if(!cloudConfigured()){showToast('Supabase Publishable Key 설정이 필요합니다.');return}const email=cloudEmail.value.trim();if(!email){showToast('이메일을 입력해주세요.');return}if(location.protocol!=='http:'&&location.protocol!=='https:'){renderCloudStatus('웹 주소에서 실행해주세요');showToast('로그인 링크는 localhost 또는 HTTPS 주소에서 사용할 수 있습니다.');return}renderCloudStatus('로그인 링크 발송 중…');const redirectTo=location.href.split('#')[0].split('?')[0];const {error}=await state.cloud.client.auth.signInWithOtp({email,options:{emailRedirectTo:redirectTo,shouldCreateUser:true}});if(error){renderCloudStatus('링크 발송 실패');showToast(error.message);return}renderCloudStatus('이메일을 확인해주세요');showToast('로그인 링크를 보냈습니다. 이메일에서 링크를 누르면 로그인됩니다.')}
+async function cloudLogin(){
+  if(!cloudConfigured()){showToast('Supabase Project URL과 Publishable Key를 먼저 적용해주세요.');return}
+  const email=cloudEmail.value.trim(),password=cloudPassword.value;
+  if(!email||!password){showToast('이메일과 비밀번호를 입력해주세요.');return}
+  renderCloudStatus('Cloud 로그인 중…');
+  const {data,error}=await state.cloud.client.auth.signInWithPassword({email,password});
+  if(error){renderCloudStatus('로그인 실패');showToast(error.message);return}
+  cloudPassword.value='';await cloudAfterLogin(data.user)
+}
+async function cloudSignup(){
+  if(!cloudConfigured()){showToast('Supabase Project URL과 Publishable Key를 먼저 적용해주세요.');return}
+  const email=cloudEmail.value.trim(),password=cloudPassword.value;
+  if(!email||password.length<6){showToast('이메일과 6자 이상 비밀번호를 입력해주세요.');return}
+  renderCloudStatus('계정 생성 중…');
+  const {data,error}=await state.cloud.client.auth.signUp({email,password});
+  if(error){renderCloudStatus('가입 실패');showToast(error.message);return}
+  if(data.session&&data.user){cloudPassword.value='';await cloudAfterLogin(data.user)}
+  else{renderCloudStatus('가입됨 · 이메일 확인 설정을 확인해주세요');showToast('계정은 생성됐지만 이메일 확인이 켜져 있으면 인증 전 로그인할 수 없습니다. 인증 메일을 사용하지 않으려면 Supabase Auth의 Confirm email을 꺼주세요.')}
+}
+async function cloudGoogleLogin(){
+  if(!cloudConfigured()){showToast('Supabase Project URL과 Publishable Key를 먼저 적용해주세요.');return}
+  if(location.protocol!=='http:'&&location.protocol!=='https:'){showToast('Google 로그인은 localhost 또는 HTTPS 주소에서 실행해주세요.');return}
+  const redirectTo=location.href.split('#')[0].split('?')[0];
+  const {error}=await state.cloud.client.auth.signInWithOAuth({provider:'google',options:{redirectTo}});
+  if(error){renderCloudStatus('Google 로그인 실패');showToast(error.message)}
+}
 async function cloudLogout(){if(state.cloud.channel)state.cloud.client.removeChannel(state.cloud.channel);await state.cloud.client.auth.signOut();state.cloud.user=null;state.cloud.channel=null;renderCloudStatus();showToast('Cloud에서 로그아웃했습니다. 로컬 캐시는 유지됩니다.')}
-async function initCloud(){if(!cloudConfigured()){renderCloudStatus();return}try{state.cloud.client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const {data:{session}}=await state.cloud.client.auth.getSession();if(session?.user)await cloudAfterLogin(session.user);else renderCloudStatus();state.cloud.client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){state.cloud.user=null;renderCloudStatus()}else if(session?.user&&!state.cloud.user){setTimeout(()=>cloudAfterLogin(session.user),0)}})}catch(e){console.error(e);renderCloudStatus('Cloud 초기화 실패')}}
+function saveCloudProjectConfig(){
+  const url=cloudProjectUrl.value.trim().replace(/\/$/,'');
+  const key=cloudProjectKey.value.trim();
+  if(!/^https:\/\/.+\.supabase\.co$/i.test(url)){showToast('올바른 Supabase Project URL을 입력해주세요.');return}
+  if(!key){showToast('Publishable Key를 입력해주세요.');return}
+  localStorage.setItem(STORAGE.cloudUrl,url);localStorage.setItem(STORAGE.cloudKey,key);
+  showToast('Supabase 프로젝트 정보를 저장했습니다. 페이지를 다시 연결합니다.');
+  setTimeout(()=>location.reload(),350)
+}
+async function initCloud(){
+  cloudProjectUrl.value=SUPABASE_URL||'';cloudProjectKey.value=SUPABASE_PUBLISHABLE_KEY||'';
+  if(!cloudConfigured()){renderCloudStatus();return}
+  try{
+    state.cloud.client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+    const {data:{session}}=await state.cloud.client.auth.getSession();
+    if(session?.user)await cloudAfterLogin(session.user);else renderCloudStatus();
+    state.cloud.client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){state.cloud.user=null;renderCloudStatus()}else if(session?.user&&!state.cloud.user){setTimeout(()=>cloudAfterLogin(session.user),0)}})
+  }catch(e){console.error(e);renderCloudStatus('Cloud 초기화 실패')}
+}
 
 function normalizeLegacyEvents(){state.events=state.events.map(e=>{const source=e.source||'local';let hasTime=typeof e.hasTime==='boolean'?e.hasTime:Boolean(e.start&&e.end);if(source==='todomate'&&typeof e.hasTime!=='boolean'&&typeof e.todomateHasTime!=='boolean'&&e.start==='09:00'&&e.end==='10:00')hasTime=false;if(typeof e.todomateHasTime==='boolean')hasTime=e.todomateHasTime;return {...e,id:e.id||uuid(),category:categories.includes(e.category)?e.category:'Personal',source,googleEventId:e.googleEventId||null,todomateTodoId:e.todomateTodoId||null,todomateGoalId:e.todomateGoalId||null,todomateGoalName:e.todomateGoalName||'',routineId:e.routineId||null,repeatType:e.repeatType||'none',hasTime,start:hasTime?(e.start||'09:00'):'',end:hasTime?(e.end||'10:00'):'',completed:Boolean(e.completed)} });persist()}
 normalizeLegacyEvents();
@@ -437,7 +505,7 @@ function renderAndRefresh(){renderAll();setTimeout(refreshVisibleSync,0)}
 const app=document.getElementById('app'),startHourEl=document.getElementById('startHour'),endHourEl=document.getElementById('endHour');
 const startMinute=document.getElementById('startMinute'),endMinute=document.getElementById('endMinute'),dateInput=document.getElementById('dateInput'),categoryInput=document.getElementById('categoryInput'),titleInput=document.getElementById('titleInput'),naturalInput=document.getElementById('naturalInput'),repeatInput=document.getElementById('repeatInput'),repeatUntilInput=document.getElementById('repeatUntilInput'),repeatUntilWrap=document.getElementById('repeatUntilWrap');
 const menuBtn=document.getElementById('menuBtn'),backdrop=document.getElementById('backdrop'),prevBtn=document.getElementById('prevBtn'),nextBtn=document.getElementById('nextBtn'),todayBtn=document.getElementById('todayBtn'),addBtn=document.getElementById('addBtn'),composerCloseBtn=document.getElementById('composerCloseBtn');
-const cloudEmail=document.getElementById('cloudEmail'),cloudMagicBtn=document.getElementById('cloudMagicBtn'),cloudLogoutBtn=document.getElementById('cloudLogoutBtn');
+const cloudProjectUrl=document.getElementById('cloudProjectUrl'),cloudProjectKey=document.getElementById('cloudProjectKey'),cloudProjectSaveBtn=document.getElementById('cloudProjectSaveBtn'),cloudEmail=document.getElementById('cloudEmail'),cloudPassword=document.getElementById('cloudPassword'),cloudLoginBtn=document.getElementById('cloudLoginBtn'),cloudSignupBtn=document.getElementById('cloudSignupBtn'),cloudGoogleBtn=document.getElementById('cloudGoogleBtn'),cloudLogoutBtn=document.getElementById('cloudLogoutBtn');
 const tmEmail=document.getElementById('tmEmail'),tmPassword=document.getElementById('tmPassword'),tmConnectBtn=document.getElementById('tmConnectBtn'),tmDisconnectBtn=document.getElementById('tmDisconnectBtn'),tmPullBtn=document.getElementById('tmPullBtn');
 const googleClientId=document.getElementById('googleClientId'),googleConnectBtn=document.getElementById('googleConnectBtn'),googleDisconnectBtn=document.getElementById('googleDisconnectBtn');
 menuBtn.onclick=()=>{if(isMobile())app.classList.toggle('mobile-sidebar-open');else app.classList.toggle('sidebar-closed')};backdrop.onclick=()=>app.classList.remove('mobile-sidebar-open');
@@ -446,7 +514,7 @@ nextBtn.onclick=()=>{closeComposer();if(state.view==='day')state.cursorDate=addD
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{closeComposer();state.view=b.dataset.view;persist();renderAndRefresh()});
 repeatInput.onchange=()=>{const on=repeatInput.value!=='none';repeatUntilWrap.hidden=!on;if(on&&!repeatUntilInput.value){const base=dateInput.value?new Date(dateInput.value+'T00:00:00'):new Date();repeatUntilInput.value=isoDate(addDays(base,28))}};
 addBtn.onclick=addEvent;composerCloseBtn.onclick=closeComposer;naturalInput.addEventListener('change',e=>parseNatural(e.target.value));naturalInput.addEventListener('keydown',e=>{if(e.key==='Enter'){parseNatural(e.target.value);titleInput.focus()}});titleInput.addEventListener('keydown',e=>{if(e.key==='Enter')addEvent()});document.querySelectorAll('.time-part').forEach(input=>{input.addEventListener('focus',e=>e.target.select());input.addEventListener('blur',normalizeTimeInputs)});
-cloudMagicBtn.onclick=cloudSendMagicLink;cloudLogoutBtn.onclick=cloudLogout;cloudEmail.addEventListener('keydown',e=>{if(e.key==='Enter')cloudSendMagicLink()});
+cloudProjectSaveBtn.onclick=saveCloudProjectConfig;cloudLoginBtn.onclick=cloudLogin;cloudSignupBtn.onclick=cloudSignup;cloudGoogleBtn.onclick=cloudGoogleLogin;cloudLogoutBtn.onclick=cloudLogout;cloudPassword.addEventListener('keydown',e=>{if(e.key==='Enter')cloudLogin()});
 tmConnectBtn.onclick=connectTodomate;tmDisconnectBtn.onclick=disconnectTodomate;tmPullBtn.onclick=pullTodomate;
 googleClientId.value=state.google.clientId;googleConnectBtn.onclick=connectGoogle;googleDisconnectBtn.onclick=disconnectGoogle;
 window.addEventListener('resize',()=>{if(!isMobile())app.classList.remove('mobile-sidebar-open')});
